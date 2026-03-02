@@ -1,0 +1,22 @@
+# build dirs
+build*/
+cmake-build*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+.ninja_*
+*.ninja
+
+# editor/ide
+.vscode/
+.idea/
+*.user
+*.autosave
+
+# misc
+*.o
+*.a
+*.so
+*.dylib
+*.exe
