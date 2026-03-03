@@ -1,24 +1,28 @@
-[Unit]
-Description=PuppyCam (Qt6 V4L2 MJPEG streamer)
-After=network-online.target
-Wants=network-online.target
-
 [Service]
 Type=simple
 User=puppycam
 Group=video
 
-# Run on localhost only (Tailscale Serve will expose it)
-Environment=PUPPYCAM_DEVICE=/dev/v4l/by-id/usb-EMEET_EMEET_SmartCam_C960_A250926000113128-video-index0
+# Optional env file; service still runs with defaults below
+EnvironmentFile=-/etc/puppycam.env
+
+# Defaults (used if not set in /etc/puppycam.env)
+Environment=PUPPYCAM_DEVICE=/dev/video0
+Environment=PUPPYCAM_WIDTH=1280
+Environment=PUPPYCAM_HEIGHT=720
+Environment=PUPPYCAM_FPS=10
+Environment=PUPPYCAM_PORT=8080
 
 ExecStart=/usr/local/bin/puppycam \
   --device ${PUPPYCAM_DEVICE} \
-  --width 1280 --height 720 --fps 10 --port 8080
+  --width ${PUPPYCAM_WIDTH} \
+  --height ${PUPPYCAM_HEIGHT} \
+  --fps ${PUPPYCAM_FPS} \
+  --port ${PUPPYCAM_PORT}
 
 Restart=on-failure
 RestartSec=2
 
-# Basic hardening (safe defaults; we can tighten later)
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
@@ -26,6 +30,3 @@ ProtectSystem=full
 
 StandardOutput=journal
 StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
