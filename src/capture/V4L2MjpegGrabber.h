@@ -1,5 +1,4 @@
 #pragma once
-#include <QtCore/QObject>
 #include <QtCore/QAtomicInt>
 #include <QtCore/QThread>
 #include <QtCore/QString>
@@ -9,23 +8,35 @@ class FrameHub;
 class V4L2MjpegGrabber : public QThread {
     Q_OBJECT
 public:
-    V4L2MjpegGrabber(FrameHub* hub,
-                     QString device = "/dev/video0",
-                     int width = 1280,
-                     int height = 720,
-                     int fps = 15,
-                     QObject* parent = nullptr);
+    explicit V4L2MjpegGrabber(FrameHub*      hub,
+                              const QString& device = QStringLiteral("auto"),
+                              int width  = 1280,
+                              int height = 720,
+                              int fps    = 10,
+                              QObject*   parent = nullptr);
 
     void stop();
+
+    // Scans /dev/v4l/by-id/ then /dev/video0..7 for the first MJPEG-capable
+    // device.  Returns an empty string if nothing is found yet.
+    static QString detectDevice();
 
 protected:
     void run() override;
 
 private:
-    FrameHub* hub_;
-    QString dev_;
-    int width_;
-    int height_;
-    int fps_;
+    // One full capture session on resolvedDevice.
+    // Returns true  = stop_ was set (clean exit, do not retry).
+    // Returns false = error occurred (caller should retry after a delay).
+    bool runOnce(const QString& resolvedDevice);
+    void sleepMs(int ms);   // ← this line was missing
+
+    FrameHub*  hub_;
+    QString    dev_;
+    int        width_;
+    int        height_;
+    int        fps_;
     QAtomicInt stop_{0};
+
+    static constexpr int kRetryMs = 3000;
 };
