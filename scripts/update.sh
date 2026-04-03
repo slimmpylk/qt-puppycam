@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# update.sh — SSH in and run this to pull + rebuild + restart
+# update.sh — pull latest code, rebuild, restart service
 set -euo pipefail
 
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
+
 echo "[1/4] Pulling latest code..."
-git pull --rebase
+git -C "$REPO_DIR" pull --rebase
 
 echo "[2/4] Building..."
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake -S "$REPO_DIR" -B "$REPO_DIR/build" -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build "$REPO_DIR/build"
 
 echo "[3/4] Installing binary..."
-sudo install -m 0755 build/qt-puppycam /usr/local/bin/qt-puppycam
+sudo install -m 0755 "$REPO_DIR/build/qt-puppycam" /usr/local/bin/puppycam
 
 echo "[4/4] Restarting service..."
 sudo systemctl restart puppycam.service
