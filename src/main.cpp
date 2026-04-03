@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName("puppycam");
-    QCoreApplication::setApplicationVersion("0.2.1");
+    QCoreApplication::setApplicationVersion("0.3.0");
 
     QCommandLineParser parser;
     parser.setApplicationDescription("Headless MJPEG webcam streamer with motion/sound detection");
@@ -57,26 +57,22 @@ int main(int argc, char *argv[])
     const QString tgToken         = env("PUPPYCAM_TELEGRAM_TOKEN");
     const QString tgChatId        = env("PUPPYCAM_TELEGRAM_CHAT_ID");
 
-    qInfo() << "puppycam v0.2.1 starting:"
-            << device << width << "x" << height << "@" << fps << "fps  port" << port;
-    qInfo() << "Motion threshold:" << motionThreshold
-            << " Sound threshold:" << soundThreshold
-            << " Pre-buffer:" << preBufferSec << "s  Post-buffer:" << postBufferSec << "s";
+    qInfo() << "puppycam v0.3.0 — disarmed by default, arm from the web UI";
 
     FrameHub hub;
 
     auto* motion   = new MotionDetector(motionThreshold, 5, &hub);
     auto* audio    = new AudioMonitor(audioDevice, soundThreshold, 5, &hub);
-    auto* recorder = new ClipRecorder(preBufferSec, postBufferSec, fps, &hub);
+    auto* recorder = new ClipRecorder(preBufferSec, postBufferSec, fps, audioDevice, &hub);
     auto* notifier = new TelegramNotifier(tgToken, tgChatId, &hub);
 
-    // Every frame → motion detector + clip pre-buffer
+    // Every frame → motion detector + clip pre-buffer (always, even when disarmed)
     QObject::connect(&hub,    &FrameHub::newFrame,
-                     motion,  &MotionDetector::onNewFrame,  Qt::QueuedConnection);
+                     motion,   &MotionDetector::onNewFrame,  Qt::QueuedConnection);
     QObject::connect(&hub,    &FrameHub::newFrame,
-                     recorder, &ClipRecorder::onNewFrame,   Qt::QueuedConnection);
+                     recorder, &ClipRecorder::onNewFrame,    Qt::QueuedConnection);
 
-    // Detection → trigger clip recorder
+    // Detection → trigger (ClipRecorder silently ignores if disarmed)
     QObject::connect(motion, &MotionDetector::motionDetected, recorder,
                      [recorder](const QByteArray&) {
                          recorder->trigger(QStringLiteral("motion"));
@@ -86,19 +82,21 @@ int main(int argc, char *argv[])
                          recorder->trigger(QStringLiteral("sound"));
                      });
 
-    // Triggered (immediate) → send snapshot photo right away
+    // Triggered → send snapshot immediately
     QObject::connect(recorder, &ClipRecorder::triggered,
                      notifier, &TelegramNotifier::onTriggered);
 
-    // Clip ready (after encoding) → upload video then delete local file
+    // Clip ready → upload video, delete local file
     QObject::connect(recorder, &ClipRecorder::clipReady,
                      notifier, &TelegramNotifier::onClipReady);
 
+    // Camera + audio threads
     V4L2MjpegGrabber grabber(&hub, device, width, height, fps);
     grabber.start();
     audio->start();
 
-    HttpServer server(&hub, fps);
+    // HTTP server — now also takes recorder for arm/disarm API
+    HttpServer server(&hub, recorder, fps);
     if (!server.listen(static_cast<quint16>(port))) {
         qCritical() << "Failed to listen on port" << port;
         grabber.stop(); grabber.wait();

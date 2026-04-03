@@ -9,28 +9,36 @@
 class ClipRecorder : public QObject {
     Q_OBJECT
 public:
-    explicit ClipRecorder(int preBufferSec  = 180,
-                          int postBufferSec = 120,
-                          int fps          = 10,
-                          QObject* parent  = nullptr);
+    explicit ClipRecorder(int            preBufferSec  = 180,
+                          int            postBufferSec = 120,
+                          int            fps           = 10,
+                          const QString& audioDevice   = QStringLiteral("auto"),
+                          QObject*       parent        = nullptr);
+
+    bool isArmed() const { return armed_; }
 
 public slots:
     void onNewFrame(const QByteArray& jpeg);
     void trigger(const QString& reason);
+    void arm();
+    void disarm();
 
 signals:
-    // Fired IMMEDIATELY at trigger moment — snapshot is the exact frame that triggered it
+    // Fired immediately at trigger — snapshot is the exact frame at that moment
     void triggered(const QString& reason, QByteArray snapshot);
-
-    // Fired when the mp4 file has been encoded and is ready on disk
+    // Fired when mp4 is encoded and ready
     void clipReady(const QString& mp4Path, const QString& reason);
+    // Fired when armed state changes
+    void armedChanged(bool armed);
 
 private:
     void finishClip();
 
-    int fps_;
-    int maxPreFrames_;
-    int postFrames_;
+    int     fps_;
+    int     maxPreFrames_;
+    int     postFrames_;
+    QString audioDevice_;
+    bool    armed_ = false;  // disarmed by default — arm manually from the UI
 
     std::deque<std::pair<qint64, QByteArray>> ring_;
 

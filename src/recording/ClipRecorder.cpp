@@ -8,18 +8,42 @@
 
 static const QString kClipDir = QStringLiteral("/var/lib/puppycam/clips");
 
-ClipRecorder::ClipRecorder(int preBufferSec, int postBufferSec, int fps, QObject* parent)
+ClipRecorder::ClipRecorder(int preBufferSec, int postBufferSec,
+                           int fps, const QString& audioDevice,
+                           QObject* parent)
     : QObject(parent)
     , fps_(fps)
     , maxPreFrames_(preBufferSec * fps)
     , postFrames_(postBufferSec * fps)
+    , audioDevice_(audioDevice)
 {}
+
+// ── arm / disarm ──────────────────────────────────────────────────────────────
+
+void ClipRecorder::arm()
+{
+    if (armed_) return;
+    armed_ = true;
+    qInfo() << "ClipRecorder: ARMED — motion/sound detection active";
+    emit armedChanged(true);
+}
+
+void ClipRecorder::disarm()
+{
+    if (!armed_) return;
+    armed_ = false;
+    qInfo() << "ClipRecorder: DISARMED — detection paused";
+    emit armedChanged(false);
+}
+
+// ── incoming frames ───────────────────────────────────────────────────────────
 
 void ClipRecorder::onNewFrame(const QByteArray& jpeg)
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
 
     if (state_ == State::Idle) {
+        // Always keep the ring buffer rolling so pre-buffer is ready when armed
         ring_.emplace_back(now, jpeg);
         if (static_cast<int>(ring_.size()) > maxPreFrames_)
             ring_.pop_front();
@@ -30,13 +54,15 @@ void ClipRecorder::onNewFrame(const QByteArray& jpeg)
     }
 }
 
+// ── trigger ───────────────────────────────────────────────────────────────────
+
 void ClipRecorder::trigger(const QString& reason)
 {
+    if (!armed_) return;                 // silently ignore when disarmed
     if (state_ == State::Capturing) return;
 
     qInfo() << "ClipRecorder: triggered by" << reason;
 
-    // Grab snapshot BEFORE moving ring_ into clip_ — this is the exact trigger frame
     const QByteArray snapshot = ring_.empty() ? QByteArray{} : ring_.back().second;
 
     state_         = State::Capturing;
@@ -46,9 +72,10 @@ void ClipRecorder::trigger(const QString& reason)
     clip_.assign(ring_.begin(), ring_.end());
     ring_.clear();
 
-    // Emit immediately so Telegram sends the photo right now, not after 2 minutes
     emit triggered(reason, snapshot);
 }
+
+// ── encode and emit ───────────────────────────────────────────────────────────
 
 void ClipRecorder::finishClip()
 {
@@ -70,6 +97,13 @@ void ClipRecorder::finishClip()
     clip_.clear();
 
     qInfo() << "ClipRecorder: encoding" << frameCount << "frames ->" << out;
+
+    // Resolve audio device for FFmpeg
+    // Note: audio is captured live during encoding so it covers the post-buffer period
+    const QString alsaDev = (audioDevice_.compare(QStringLiteral("auto"),
+                                                  Qt::CaseInsensitive) == 0)
+                                ? QStringLiteral("hw:2,0")   // fallback; auto-detect improves this
+                                : audioDevice_;
 
     auto* proc = new QProcess(this);
     const QString framePat      = tmp + QStringLiteral("/frame_%06d.jpg");
@@ -93,10 +127,17 @@ void ClipRecorder::finishClip()
             });
 
     proc->start(QStringLiteral("ffmpeg"), {
+                                              // Video from pre-captured frames
                                               QStringLiteral("-framerate"), QString::number(fps_),
                                               QStringLiteral("-i"),         framePat,
+                                              // Audio from camera mic (live during encoding)
+                                              QStringLiteral("-f"),         QStringLiteral("alsa"),
+                                              QStringLiteral("-i"),         alsaDev,
+                                              // Output
                                               QStringLiteral("-c:v"),       QStringLiteral("libx264"),
                                               QStringLiteral("-pix_fmt"),   QStringLiteral("yuv420p"),
+                                              QStringLiteral("-c:a"),       QStringLiteral("aac"),
+                                              QStringLiteral("-shortest"),  // stop when shortest stream ends
                                               QStringLiteral("-y"),         out
                                           });
 }
