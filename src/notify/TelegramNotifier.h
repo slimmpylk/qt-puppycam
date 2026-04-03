@@ -22,6 +22,9 @@ private:
     void sendMessage(const QString& text);
     void sendPhoto(const QByteArray& jpeg, const QString& caption);
 
+    // Uploads mp4 to Telegram, deletes local file on success
+    void sendVideoAndDelete(const QString& path, const QString& caption);
+
     QString               token_;
     QString               chatId_;
     QNetworkAccessManager nam_;
