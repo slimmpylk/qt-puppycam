@@ -1,21 +1,29 @@
 #pragma once
-#include <QtCore/QByteArray>
 #include <QtCore/QObject>
-#include <QtCore/QReadWriteLock>
+#include <QtCore/QByteArray>
+#include <QtGui/QImage>
 
-class FrameHub : public QObject {
+class MotionDetector : public QObject {
     Q_OBJECT
 public:
-    explicit FrameHub(QObject* parent = nullptr);
+    // threshold : number of changed pixels at 320x180 grayscale to trigger
+    // cooldownSec : minimum seconds between successive triggers
+    explicit MotionDetector(int threshold   = 3000,
+                            int cooldownSec = 5,
+                            QObject* parent = nullptr);
 
-    void       setLatestJpeg(QByteArray jpeg);
-    QByteArray latestJpeg() const;
+public slots:
+    void onNewFrame(const QByteArray& jpeg);
 
 signals:
-    // Emitted for every captured frame — connected via Qt::QueuedConnection
-    void newFrame(QByteArray jpeg);
+    void motionDetected(const QByteArray& frame);
 
 private:
-    mutable QReadWriteLock lock_;
-    QByteArray             latest_;
+    QImage  prev_;
+    int     threshold_;
+    int     cooldownMs_;
+    qint64  lastDetectMs_ = 0;
+
+    static constexpr int kW = 320;
+    static constexpr int kH = 180;
 };
