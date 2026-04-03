@@ -102,7 +102,7 @@ void ClipRecorder::finishClip()
     // Note: audio is captured live during encoding so it covers the post-buffer period
     const QString alsaDev = (audioDevice_.compare(QStringLiteral("auto"),
                                                   Qt::CaseInsensitive) == 0)
-                                ? QStringLiteral("hw:2,0")   // fallback; auto-detect improves this
+                                ? QStringLiteral("plughw:2,0")   // fallback; auto-detect improves this
                                 : audioDevice_;
 
     auto* proc = new QProcess(this);
