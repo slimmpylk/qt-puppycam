@@ -15,8 +15,6 @@ ClipRecorder::ClipRecorder(int preBufferSec, int postBufferSec, int fps, QObject
     , postFrames_(postBufferSec * fps)
 {}
 
-// ── incoming frames ───────────────────────────────────────────────────────────
-
 void ClipRecorder::onNewFrame(const QByteArray& jpeg)
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -32,24 +30,25 @@ void ClipRecorder::onNewFrame(const QByteArray& jpeg)
     }
 }
 
-// ── trigger ───────────────────────────────────────────────────────────────────
-
 void ClipRecorder::trigger(const QString& reason)
 {
-    if (state_ == State::Capturing) return; // already recording
+    if (state_ == State::Capturing) return;
 
     qInfo() << "ClipRecorder: triggered by" << reason;
+
+    // Grab snapshot BEFORE moving ring_ into clip_ — this is the exact trigger frame
+    const QByteArray snapshot = ring_.empty() ? QByteArray{} : ring_.back().second;
+
     state_         = State::Capturing;
     reason_        = reason;
     postRemaining_ = postFrames_;
-    snapshot_      = ring_.empty() ? QByteArray{} : ring_.back().second;
 
-    // Seed clip with everything in the pre-buffer
     clip_.assign(ring_.begin(), ring_.end());
     ring_.clear();
-}
 
-// ── encode and emit ───────────────────────────────────────────────────────────
+    // Emit immediately so Telegram sends the photo right now, not after 2 minutes
+    emit triggered(reason, snapshot);
+}
 
 void ClipRecorder::finishClip()
 {
@@ -63,34 +62,32 @@ void ClipRecorder::finishClip()
     QDir().mkpath(tmp);
     QDir().mkpath(kClipDir);
 
-    // Write individual JPEG frames
-    for (int i = 0; i < static_cast<int>(clip_.size()); ++i) {
+    const int frameCount = static_cast<int>(clip_.size());
+    for (int i = 0; i < frameCount; ++i) {
         QFile f(QStringLiteral("%1/frame_%2.jpg").arg(tmp).arg(i, 6, 10, QChar('0')));
         if (f.open(QIODevice::WriteOnly)) f.write(clip_[i].second);
     }
     clip_.clear();
 
-    qInfo() << "ClipRecorder: encoding" << clip_.size() << "frames ->" << out;
+    qInfo() << "ClipRecorder: encoding" << frameCount << "frames ->" << out;
 
-    // Encode with FFmpeg (async — won't block the event loop)
     auto* proc = new QProcess(this);
-    const QString framePat = tmp + QStringLiteral("/frame_%06d.jpg");
+    const QString framePat      = tmp + QStringLiteral("/frame_%06d.jpg");
+    const QString capturedReason = reason_;
 
     connect(proc,
             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this,
-            [this, proc, tmp, out](int exitCode, QProcess::ExitStatus) {
+            [this, proc, tmp, out, capturedReason](int exitCode, QProcess::ExitStatus) {
                 if (exitCode == 0) {
                     qInfo() << "ClipRecorder: saved" << out;
-                    emit clipReady(out, reason_, snapshot_);
+                    emit clipReady(out, capturedReason);
                 } else {
                     qWarning() << "ClipRecorder: ffmpeg error:"
                                << proc->readAllStandardError();
                 }
-                // Clean up temp frame dir
                 QDir d(tmp);
-                const QStringList files = d.entryList(QDir::Files);
-                for (const QString& f : files) d.remove(f);
+                for (const QString& f : d.entryList(QDir::Files)) d.remove(f);
                 QDir().rmdir(tmp);
                 proc->deleteLater();
             });
@@ -100,7 +97,6 @@ void ClipRecorder::finishClip()
                                               QStringLiteral("-i"),         framePat,
                                               QStringLiteral("-c:v"),       QStringLiteral("libx264"),
                                               QStringLiteral("-pix_fmt"),   QStringLiteral("yuv420p"),
-                                              QStringLiteral("-y"),
-                                              out
+                                              QStringLiteral("-y"),         out
                                           });
 }

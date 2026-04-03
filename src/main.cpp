@@ -16,7 +16,6 @@ static QString defaultDevice() {
     return QStringLiteral("auto");
 }
 
-// Helper: read env var, fall back to default
 static QString env(const char* key, const QString& def = {}) {
     const QString v = qEnvironmentVariable(key);
     return v.isEmpty() ? def : v;
@@ -26,7 +25,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName("puppycam");
-    QCoreApplication::setApplicationVersion("0.2.0");
+    QCoreApplication::setApplicationVersion("0.2.1");
 
     QCommandLineParser parser;
     parser.setApplicationDescription("Headless MJPEG webcam streamer with motion/sound detection");
@@ -45,12 +44,11 @@ int main(int argc, char *argv[])
 
     bool ok;
     const QString device = parser.value(deviceOpt);
-    const int port   = parser.value(portOpt).toInt(&ok);   if (!ok||port  <1||port  >65535) return 2;
-    const int width  = parser.value(widthOpt).toInt(&ok);  if (!ok||width <16)              return 2;
-    const int height = parser.value(heightOpt).toInt(&ok); if (!ok||height<16)              return 2;
-    const int fps    = parser.value(fpsOpt).toInt(&ok);    if (!ok||fps   <1||fps   >120)   return 2;
+    const int port   = parser.value(portOpt).toInt(&ok);   if (!ok||port  <1||port>65535) return 2;
+    const int width  = parser.value(widthOpt).toInt(&ok);  if (!ok||width <16)            return 2;
+    const int height = parser.value(heightOpt).toInt(&ok); if (!ok||height<16)            return 2;
+    const int fps    = parser.value(fpsOpt).toInt(&ok);    if (!ok||fps   <1||fps>120)    return 2;
 
-    // Detection & notification config — all from /etc/puppycam.env
     const int     motionThreshold = env("PUPPYCAM_MOTION_THRESHOLD", "3000").toInt();
     const int     soundThreshold  = env("PUPPYCAM_SOUND_THRESHOLD",  "1500").toInt();
     const QString audioDevice     = env("PUPPYCAM_AUDIO_DEVICE",     "auto");
@@ -59,15 +57,12 @@ int main(int argc, char *argv[])
     const QString tgToken         = env("PUPPYCAM_TELEGRAM_TOKEN");
     const QString tgChatId        = env("PUPPYCAM_TELEGRAM_CHAT_ID");
 
-    qInfo() << "puppycam v0.2.0 starting:"
+    qInfo() << "puppycam v0.2.1 starting:"
             << device << width << "x" << height << "@" << fps << "fps  port" << port;
     qInfo() << "Motion threshold:" << motionThreshold
             << " Sound threshold:" << soundThreshold
             << " Pre-buffer:" << preBufferSec << "s  Post-buffer:" << postBufferSec << "s";
-    if (tgToken.isEmpty())
-        qInfo() << "Telegram: not configured (set PUPPYCAM_TELEGRAM_TOKEN + PUPPYCAM_TELEGRAM_CHAT_ID)";
 
-    // ── create components ────────────────────────────────────────────────────
     FrameHub hub;
 
     auto* motion   = new MotionDetector(motionThreshold, 5, &hub);
@@ -75,15 +70,13 @@ int main(int argc, char *argv[])
     auto* recorder = new ClipRecorder(preBufferSec, postBufferSec, fps, &hub);
     auto* notifier = new TelegramNotifier(tgToken, tgChatId, &hub);
 
-    // ── wire up signals ──────────────────────────────────────────────────────
+    // Every frame → motion detector + clip pre-buffer
+    QObject::connect(&hub,    &FrameHub::newFrame,
+                     motion,  &MotionDetector::onNewFrame,  Qt::QueuedConnection);
+    QObject::connect(&hub,    &FrameHub::newFrame,
+                     recorder, &ClipRecorder::onNewFrame,   Qt::QueuedConnection);
 
-    // Every frame → motion detector and clip pre-buffer
-    QObject::connect(&hub, &FrameHub::newFrame,
-                     motion, &MotionDetector::onNewFrame, Qt::QueuedConnection);
-    QObject::connect(&hub, &FrameHub::newFrame,
-                     recorder, &ClipRecorder::onNewFrame, Qt::QueuedConnection);
-
-    // Detection events → trigger clip recording
+    // Detection → trigger clip recorder
     QObject::connect(motion, &MotionDetector::motionDetected, recorder,
                      [recorder](const QByteArray&) {
                          recorder->trigger(QStringLiteral("motion"));
@@ -93,11 +86,14 @@ int main(int argc, char *argv[])
                          recorder->trigger(QStringLiteral("sound"));
                      });
 
-    // Clip ready → Telegram notification
+    // Triggered (immediate) → send snapshot photo right away
+    QObject::connect(recorder, &ClipRecorder::triggered,
+                     notifier, &TelegramNotifier::onTriggered);
+
+    // Clip ready (after encoding) → upload video then delete local file
     QObject::connect(recorder, &ClipRecorder::clipReady,
                      notifier, &TelegramNotifier::onClipReady);
 
-    // ── start threads ────────────────────────────────────────────────────────
     V4L2MjpegGrabber grabber(&hub, device, width, height, fps);
     grabber.start();
     audio->start();

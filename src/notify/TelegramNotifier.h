@@ -10,19 +10,18 @@ public:
     explicit TelegramNotifier(const QString& token,
                               const QString& chatId,
                               QObject*       parent = nullptr);
-
     bool isConfigured() const;
 
 public slots:
-    void onClipReady(const QString& mp4Path,
-                     const QString& reason,
-                     const QByteArray& snapshot);
+    // Called immediately at trigger — sends snapshot photo right away
+    void onTriggered(const QString& reason, const QByteArray& snapshot);
+
+    // Called when mp4 is ready — uploads video then deletes local file
+    void onClipReady(const QString& mp4Path, const QString& reason);
 
 private:
     void sendMessage(const QString& text);
     void sendPhoto(const QByteArray& jpeg, const QString& caption);
-
-    // Uploads mp4 to Telegram, deletes local file on success
     void sendVideoAndDelete(const QString& path, const QString& caption);
 
     QString               token_;
