@@ -5,95 +5,115 @@
 #include "core/FrameHub.h"
 #include "capture/V4L2MjpegGrabber.h"
 #include "server/HttpServer.h"
+#include "detection/MotionDetector.h"
+#include "detection/AudioMonitor.h"
+#include "recording/ClipRecorder.h"
+#include "notify/TelegramNotifier.h"
 
-// Tries to find a real MJPEG camera at startup so the CLI --help shows a
-// sensible default.  If nothing is plugged in yet we return the magic token
-// "auto" — the grabber will keep scanning until a camera appears.
-static QString defaultDevice()
-{
+static QString defaultDevice() {
     const QString found = V4L2MjpegGrabber::detectDevice();
-    if (!found.isEmpty()) {
-        qInfo() << "Auto-detected camera:" << found;
-        return found;
-    }
-    qInfo() << "No MJPEG camera found at startup — will retry when one is plugged in.";
+    if (!found.isEmpty()) { qInfo() << "Auto-detected camera:" << found; return found; }
     return QStringLiteral("auto");
+}
+
+// Helper: read env var, fall back to default
+static QString env(const char* key, const QString& def = {}) {
+    const QString v = qEnvironmentVariable(key);
+    return v.isEmpty() ? def : v;
 }
 
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName("puppycam");
-    QCoreApplication::setApplicationVersion("0.1.0");
+    QCoreApplication::setApplicationVersion("0.2.0");
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(
-        "Headless MJPEG webcam streamer (Qt6 + V4L2)\n"
-        "  --device auto        pick first MJPEG-capable camera (default)\n"
-        "  --device /dev/video0 pin a specific device"
-        );
+    parser.setApplicationDescription("Headless MJPEG webcam streamer with motion/sound detection");
     parser.addHelpOption();
     parser.addVersionOption();
 
-    QCommandLineOption deviceOpt(
-        {"d", "device"},
-        "V4L2 device path, or \"auto\" to detect automatically.",
-        "path",
-        defaultDevice()
-        );
-    QCommandLineOption portOpt(
-        {"p", "port"},
-        "HTTP listen port (binds 0.0.0.0 so Tailscale can reach it).",
-        "port",
-        "8080"
-        );
-    QCommandLineOption widthOpt ({"W", "width"},  "Capture width.",  "px",  "1280");
-    QCommandLineOption heightOpt({"H", "height"}, "Capture height.", "px",  "720");
-    QCommandLineOption fpsOpt   ({"f", "fps"},    "Target fps.",     "fps", "10");
+    QCommandLineOption deviceOpt ({"d","device"}, "V4L2 device or auto.", "path", defaultDevice());
+    QCommandLineOption portOpt   ({"p","port"},   "HTTP port.",           "port", env("PUPPYCAM_PORT",   "8080"));
+    QCommandLineOption widthOpt  ({"W","width"},  "Capture width px.",    "px",   env("PUPPYCAM_WIDTH",  "1280"));
+    QCommandLineOption heightOpt ({"H","height"}, "Capture height px.",   "px",   env("PUPPYCAM_HEIGHT", "720"));
+    QCommandLineOption fpsOpt    ({"f","fps"},    "Target fps.",          "fps",  env("PUPPYCAM_FPS",    "10"));
 
-    parser.addOption(deviceOpt);
-    parser.addOption(portOpt);
-    parser.addOption(widthOpt);
-    parser.addOption(heightOpt);
-    parser.addOption(fpsOpt);
+    parser.addOption(deviceOpt); parser.addOption(portOpt);
+    parser.addOption(widthOpt);  parser.addOption(heightOpt); parser.addOption(fpsOpt);
     parser.process(app);
 
+    bool ok;
     const QString device = parser.value(deviceOpt);
+    const int port   = parser.value(portOpt).toInt(&ok);   if (!ok||port  <1||port  >65535) return 2;
+    const int width  = parser.value(widthOpt).toInt(&ok);  if (!ok||width <16)              return 2;
+    const int height = parser.value(heightOpt).toInt(&ok); if (!ok||height<16)              return 2;
+    const int fps    = parser.value(fpsOpt).toInt(&ok);    if (!ok||fps   <1||fps   >120)   return 2;
 
-    bool ok = false;
-    const int port = parser.value(portOpt).toInt(&ok);
-    if (!ok || port < 1 || port > 65535) { qCritical() << "Invalid --port:"   << parser.value(portOpt);   return 2; }
-    const int width  = parser.value(widthOpt).toInt(&ok);
-    if (!ok || width  < 16 || width  > 7680) { qCritical() << "Invalid --width:"  << parser.value(widthOpt);  return 2; }
-    const int height = parser.value(heightOpt).toInt(&ok);
-    if (!ok || height < 16 || height > 4320) { qCritical() << "Invalid --height:" << parser.value(heightOpt); return 2; }
-    const int fps    = parser.value(fpsOpt).toInt(&ok);
-    if (!ok || fps < 1 || fps > 120)         { qCritical() << "Invalid --fps:"    << parser.value(fpsOpt);    return 2; }
+    // Detection & notification config — all from /etc/puppycam.env
+    const int     motionThreshold = env("PUPPYCAM_MOTION_THRESHOLD", "3000").toInt();
+    const int     soundThreshold  = env("PUPPYCAM_SOUND_THRESHOLD",  "1500").toInt();
+    const QString audioDevice     = env("PUPPYCAM_AUDIO_DEVICE",     "auto");
+    const int     preBufferSec    = env("PUPPYCAM_PRE_BUFFER_SEC",   "180").toInt();
+    const int     postBufferSec   = env("PUPPYCAM_POST_BUFFER_SEC",  "120").toInt();
+    const QString tgToken         = env("PUPPYCAM_TELEGRAM_TOKEN");
+    const QString tgChatId        = env("PUPPYCAM_TELEGRAM_CHAT_ID");
 
-    qInfo() << "Starting puppycam:"
-            << "device=" << device
-            << "size="   << width << "x" << height
-            << "fps="    << fps
-            << "port="   << port;
+    qInfo() << "puppycam v0.2.0 starting:"
+            << device << width << "x" << height << "@" << fps << "fps  port" << port;
+    qInfo() << "Motion threshold:" << motionThreshold
+            << " Sound threshold:" << soundThreshold
+            << " Pre-buffer:" << preBufferSec << "s  Post-buffer:" << postBufferSec << "s";
+    if (tgToken.isEmpty())
+        qInfo() << "Telegram: not configured (set PUPPYCAM_TELEGRAM_TOKEN + PUPPYCAM_TELEGRAM_CHAT_ID)";
 
+    // ── create components ────────────────────────────────────────────────────
     FrameHub hub;
 
+    auto* motion   = new MotionDetector(motionThreshold, 5, &hub);
+    auto* audio    = new AudioMonitor(audioDevice, soundThreshold, 5, &hub);
+    auto* recorder = new ClipRecorder(preBufferSec, postBufferSec, fps, &hub);
+    auto* notifier = new TelegramNotifier(tgToken, tgChatId, &hub);
+
+    // ── wire up signals ──────────────────────────────────────────────────────
+
+    // Every frame → motion detector and clip pre-buffer
+    QObject::connect(&hub, &FrameHub::newFrame,
+                     motion, &MotionDetector::onNewFrame, Qt::QueuedConnection);
+    QObject::connect(&hub, &FrameHub::newFrame,
+                     recorder, &ClipRecorder::onNewFrame, Qt::QueuedConnection);
+
+    // Detection events → trigger clip recording
+    QObject::connect(motion, &MotionDetector::motionDetected, recorder,
+                     [recorder](const QByteArray&) {
+                         recorder->trigger(QStringLiteral("motion"));
+                     });
+    QObject::connect(audio, &AudioMonitor::soundDetected, recorder,
+                     [recorder] {
+                         recorder->trigger(QStringLiteral("sound"));
+                     });
+
+    // Clip ready → Telegram notification
+    QObject::connect(recorder, &ClipRecorder::clipReady,
+                     notifier, &TelegramNotifier::onClipReady);
+
+    // ── start threads ────────────────────────────────────────────────────────
     V4L2MjpegGrabber grabber(&hub, device, width, height, fps);
     grabber.start();
+    audio->start();
 
-    // Pass fps so HttpServer drives the MJPEG timer at the right rate
     HttpServer server(&hub, fps);
     if (!server.listen(static_cast<quint16>(port))) {
         qCritical() << "Failed to listen on port" << port;
-        grabber.stop();
-        grabber.wait();
+        grabber.stop(); grabber.wait();
+        audio->stop();  audio->wait();
         return 1;
     }
 
-    qInfo() << "Stream ready — open http://<device-ip>:" << port;
+    qInfo().nospace() << "Stream ready — http://127.0.0.1:" << port;
     const int rc = app.exec();
 
-    grabber.stop();
-    grabber.wait();
+    grabber.stop(); grabber.wait();
+    audio->stop();  audio->wait();
     return rc;
 }
