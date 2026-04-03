@@ -9,11 +9,10 @@
 class ClipRecorder : public QObject {
     Q_OBJECT
 public:
-    explicit ClipRecorder(int            preBufferSec  = 180,
-                          int            postBufferSec = 120,
-                          int            fps           = 10,
-                          const QString& audioDevice   = QStringLiteral("auto"),
-                          QObject*       parent        = nullptr);
+    explicit ClipRecorder(int      preBufferSec  = 180,
+                          int      postBufferSec = 120,
+                          int      fps           = 10,
+                          QObject* parent        = nullptr);
 
     bool isArmed() const { return armed_; }
 
@@ -37,7 +36,6 @@ private:
     int     fps_;
     int     maxPreFrames_;
     int     postFrames_;
-    QString audioDevice_;
     bool    armed_ = false;  // disarmed by default — arm manually from the UI
 
     std::deque<std::pair<qint64, QByteArray>> ring_;

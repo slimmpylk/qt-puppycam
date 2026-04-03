@@ -63,7 +63,7 @@ int main(int argc, char *argv[])
 
     auto* motion   = new MotionDetector(motionThreshold, 5, &hub);
     auto* audio    = new AudioMonitor(audioDevice, soundThreshold, 5, &hub);
-    auto* recorder = new ClipRecorder(preBufferSec, postBufferSec, fps, audioDevice, &hub);
+    auto* recorder = new ClipRecorder(preBufferSec, postBufferSec, fps, &hub);
     auto* notifier = new TelegramNotifier(tgToken, tgChatId, &hub);
 
     // Every frame → motion detector + clip pre-buffer (always, even when disarmed)

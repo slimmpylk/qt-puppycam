@@ -9,13 +9,11 @@
 static const QString kClipDir = QStringLiteral("/var/lib/puppycam/clips");
 
 ClipRecorder::ClipRecorder(int preBufferSec, int postBufferSec,
-                           int fps, const QString& audioDevice,
-                           QObject* parent)
+                           int fps, QObject* parent)
     : QObject(parent)
     , fps_(fps)
     , maxPreFrames_(preBufferSec * fps)
     , postFrames_(postBufferSec * fps)
-    , audioDevice_(audioDevice)
 {}
 
 // ── arm / disarm ──────────────────────────────────────────────────────────────
@@ -98,12 +96,6 @@ void ClipRecorder::finishClip()
 
     qInfo() << "ClipRecorder: encoding" << frameCount << "frames ->" << out;
 
-    // Resolve audio device for FFmpeg
-    // Note: audio is captured live during encoding so it covers the post-buffer period
-    const QString alsaDev = (audioDevice_.compare(QStringLiteral("auto"),
-                                                  Qt::CaseInsensitive) == 0)
-                                ? QStringLiteral("plughw:2,0")   // fallback; auto-detect improves this
-                                : audioDevice_;
 
     auto* proc = new QProcess(this);
     const QString framePat      = tmp + QStringLiteral("/frame_%06d.jpg");
@@ -130,14 +122,9 @@ void ClipRecorder::finishClip()
                                               // Video from pre-captured frames
                                               QStringLiteral("-framerate"), QString::number(fps_),
                                               QStringLiteral("-i"),         framePat,
-                                              // Audio from camera mic (live during encoding)
-                                              QStringLiteral("-f"),         QStringLiteral("alsa"),
-                                              QStringLiteral("-i"),         alsaDev,
-                                              // Output
+                                              // NO audio — ALSA device is busy with AudioMonitor
                                               QStringLiteral("-c:v"),       QStringLiteral("libx264"),
                                               QStringLiteral("-pix_fmt"),   QStringLiteral("yuv420p"),
-                                              QStringLiteral("-c:a"),       QStringLiteral("aac"),
-                                              QStringLiteral("-shortest"),  // stop when shortest stream ends
                                               QStringLiteral("-y"),         out
                                           });
 }
