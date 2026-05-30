@@ -2,6 +2,7 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QObject>
 #include <QtCore/QString>
+#include <QtCore/QTimer>
 #include <QtNetwork/QNetworkAccessManager>
 
 class TelegramNotifier : public QObject {
@@ -13,11 +14,11 @@ public:
     bool isConfigured() const;
 
 public slots:
-    // Called immediately at trigger — sends snapshot photo right away
     void onTriggered(const QString& reason, const QByteArray& snapshot);
-
-    // Called when mp4 is ready — uploads video then deletes local file
     void onClipReady(const QString& mp4Path, const QString& reason);
+
+private slots:
+    void pollUpdates();
 
 private:
     void sendMessage(const QString& text);
@@ -27,4 +28,6 @@ private:
     QString               token_;
     QString               chatId_;
     QNetworkAccessManager nam_;
+    QTimer                pollTimer_;
+    qint64                updateOffset_ = 0;
 };

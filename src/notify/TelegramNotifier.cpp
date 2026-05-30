@@ -2,6 +2,9 @@
 
 #include <QtCore/QDebug>
 #include <QtCore/QFile>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtNetwork/QHttpMultiPart>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
@@ -9,7 +12,11 @@
 TelegramNotifier::TelegramNotifier(const QString& token,
                                    const QString& chatId,
                                    QObject*       parent)
-    : QObject(parent), token_(token), chatId_(chatId) {}
+    : QObject(parent), token_(token), chatId_(chatId)
+{
+    connect(&pollTimer_, &QTimer::timeout, this, &TelegramNotifier::pollUpdates);
+    pollTimer_.start(30000);
+}
 
 bool TelegramNotifier::isConfigured() const {
     return !token_.isEmpty() && !chatId_.isEmpty();
@@ -153,5 +160,37 @@ void TelegramNotifier::sendVideoAndDelete(const QString& path, const QString& ca
             QFile::remove(path);
         }
         reply->deleteLater();
+    });
+}
+
+void TelegramNotifier::pollUpdates()
+{
+    if (!isConfigured()) return;
+
+    QUrl url(QStringLiteral("https://api.telegram.org/bot%1/getUpdates?offset=%2&timeout=0")
+             .arg(token_).arg(updateOffset_));
+
+    auto* reply = nam_.get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) return;
+
+        const QJsonArray results =
+            QJsonDocument::fromJson(reply->readAll())
+                .object().value("result").toArray();
+
+        for (const QJsonValue& v : results) {
+            const QJsonObject update = v.toObject();
+            const qint64 updateId = update.value("update_id").toInteger();
+            updateOffset_ = updateId + 1;
+
+            const QString fromChat =
+                QString::number(update.value("message").toObject()
+                                      .value("chat").toObject()
+                                      .value("id").toInteger());
+
+            if (fromChat != chatId_)
+                qInfo() << "TelegramNotifier: ignored message from unauthorized chat" << fromChat;
+        }
     });
 }
