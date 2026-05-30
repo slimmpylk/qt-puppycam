@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Raspberry%20Pi-red.svg)]()
 [![Language](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)]()
 
-I wanted a security camera that would let me check in on my puppy from anywhere — and I wanted to build it properly, not glue together a bunch of Python scripts. So I wrote one from scratch in C++20 and Qt 6.
+I wanted a security camera that would let me check in on my puppy from anywhere, and I wanted to build it properly, not glue together a bunch of Python scripts. So I wrote one from scratch in C++20 and Qt 6.
 
 The result is a headless system that runs on a Raspberry Pi, streams live video over MJPEG, watches for motion and sound, records dashcam-style clips when something happens, and sends them straight to Telegram. It runs as a systemd service and handles camera disconnects, audio device changes, and remote updates without any manual intervention.
 
@@ -17,7 +17,7 @@ No OpenCV. No GStreamer. No Electron. Raw V4L2 for camera capture, ALSA for audi
 
 The camera streams MJPEG at up to 1280×720 to a simple web page that works in any browser, VLC, or ffplay. Auto camera detection picks up the right USB webcam on startup and skips built-in ones. If the camera gets unplugged, it keeps retrying until it comes back.
 
-Motion detection runs frame-differencing at 320×180 grayscale — fast, no GPU needed, tunable threshold. Sound detection reads RMS amplitude from the camera microphone via ALSA. When either triggers, the system records a clip using a pre-event ring buffer, sends an instant snapshot to Telegram, and uploads the full MP4 when it finishes. The local file is deleted after a confirmed upload.
+Motion detection runs frame-differencing at 320×180 grayscale, fast, no GPU needed, tunable threshold. Sound detection reads RMS amplitude from the camera microphone via ALSA. When either triggers, the system records a clip using a pre-event ring buffer, sends an instant snapshot to Telegram, and uploads the full MP4 when it finishes. The local file is deleted after a confirmed upload.
 
 A live clock burned into the top-left corner of every frame makes it easy to confirm the feed is actually live at a glance.
 
@@ -50,7 +50,7 @@ AudioMonitor               ← ALSA RMS ────┘     │ frames
 HttpServer                 ← serves /  /mjpeg  /snapshot.jpg
 ```
 
-V4L2 and ALSA each run in a dedicated `QThread`. All detection and recording runs on the Qt main event loop via `Qt::QueuedConnection` — no mutexes needed beyond FrameHub's `QReadWriteLock`.
+V4L2 and ALSA each run in a dedicated `QThread`. All detection and recording runs on the Qt main event loop via `Qt::QueuedConnection`, with no mutexes needed beyond FrameHub's `QReadWriteLock`.
 
 ---
 
