@@ -1,4 +1,4 @@
-#include <QtCore/QCoreApplication>
+#include <QtGui/QGuiApplication>
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QDebug>
 
@@ -23,7 +23,7 @@ static QString env(const char* key, const QString& def = {}) {
 
 int main(int argc, char *argv[])
 {
-    QCoreApplication app(argc, argv);
+    QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName("puppycam");
     QCoreApplication::setApplicationVersion("0.3.0");
 
