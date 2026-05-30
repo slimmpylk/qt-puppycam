@@ -1,31 +1,27 @@
 # qt-puppycam 🐾
 
-> Headless MJPEG webcam security system for Raspberry Pi — built from scratch in C++20 and Qt 6.
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Qt](https://img.shields.io/badge/Qt-6.x-green.svg)](https://www.qt.io/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Raspberry%20Pi-red.svg)]()
 [![Language](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)]()
 
-A production-ready, plug-and-play webcam security system. Connect any USB webcam, run one script, and get a live stream accessible from anywhere in the world — with automatic motion and sound detection, dashcam-style clip recording, and Telegram notifications.
+I wanted a security camera that would let me check in on my puppy from anywhere — and I wanted to build it properly, not glue together a bunch of Python scripts. So I wrote one from scratch in C++20 and Qt 6.
 
-No OpenCV. No GStreamer. No Electron. Pure Qt 6, V4L2, and ALSA.
+The result is a headless system that runs on a Raspberry Pi, streams live video over MJPEG, watches for motion and sound, records dashcam-style clips when something happens, and sends them straight to Telegram. It runs as a systemd service and handles camera disconnects, audio device changes, and remote updates without any manual intervention.
+
+No OpenCV. No GStreamer. No Electron. Raw V4L2 for camera capture, ALSA for audio, and a hand-rolled HTTP server.
 
 ---
 
-## Features
+## What it does
 
-- **Live MJPEG stream** — zero-latency stream viewable in any browser or VLC
-- **Auto camera detection** — detects any MJPEG-capable USB camera automatically, skips built-in webcams
-- **Plug-and-play resilience** — automatically reconnects if the camera is unplugged
-- **Motion detection** — frame-differencing algorithm at 320×180 grayscale, tunable threshold
-- **Sound detection** — RMS amplitude monitoring via ALSA on the camera's built-in microphone
-- **Dashcam-style clip recording** — configurable pre-event ring buffer + post-event recording (like a dashcam)
-- **Telegram notifications** — instant snapshot photo on trigger, full MP4 clip uploaded when ready
-- **Auto cleanup** — local clip files deleted after confirmed Telegram upload
-- **Zero-config deployment** — single `install.sh` sets up everything including systemd service
-- **Remote updates** — `update.sh` pulls, rebuilds, and restarts in one command
-- **Tailscale ready** — binds to all interfaces, accessible over Tailscale from anywhere
+The camera streams MJPEG at up to 1280×720 to a simple web page that works in any browser, VLC, or ffplay. Auto camera detection picks up the right USB webcam on startup and skips built-in ones. If the camera gets unplugged, it keeps retrying until it comes back.
+
+Motion detection runs frame-differencing at 320×180 grayscale — fast, no GPU needed, tunable threshold. Sound detection reads RMS amplitude from the camera microphone via ALSA. When either triggers, the system records a clip using a pre-event ring buffer, sends an instant snapshot to Telegram, and uploads the full MP4 when it finishes. The local file is deleted after a confirmed upload.
+
+A live clock burned into the top-left corner of every frame makes it easy to confirm the feed is actually live at a glance.
+
+The web UI has an arm/disarm toggle so alerts can be silenced when you are home, without stopping the stream or the recording buffer.
 
 ---
 
@@ -54,7 +50,7 @@ AudioMonitor               ← ALSA RMS ────┘     │ frames
 HttpServer                 ← serves /  /mjpeg  /snapshot.jpg
 ```
 
-**Threading model:** V4L2 and ALSA each run in a dedicated `QThread`. All detection and recording runs on the Qt main event loop via `Qt::QueuedConnection` — no mutexes needed beyond FrameHub's `QReadWriteLock`.
+V4L2 and ALSA each run in a dedicated `QThread`. All detection and recording runs on the Qt main event loop via `Qt::QueuedConnection` — no mutexes needed beyond FrameHub's `QReadWriteLock`.
 
 ---
 
@@ -91,23 +87,14 @@ HttpServer                 ← serves /  /mjpeg  /snapshot.jpg
 ## Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/slimmpylk/qt-puppycam.git
 cd qt-puppycam
-
-# Run the installer — handles everything
 ./scripts/install.sh
 ```
 
-The installer will:
-- Install all build and runtime dependencies via `apt`
-- Create a dedicated `puppycam` system user with `video` and `audio` group access
-- Build the binary with CMake + Ninja in Release mode
-- Install the systemd service (auto-starts on boot)
-- Create `/etc/puppycam.env` with sensible defaults
-- Create `/var/lib/puppycam/clips/` for clip storage
+The installer handles dependencies via apt, creates a dedicated system user with video and audio group access, builds the binary in Release mode, sets up the systemd service, and creates the clips directory. After that the service starts automatically on every boot.
 
-Verify it's running:
+Verify it is running:
 ```bash
 sudo systemctl status puppycam
 journalctl -u puppycam -f
@@ -117,7 +104,7 @@ journalctl -u puppycam -f
 
 ## Configuration
 
-All runtime settings live in `/etc/puppycam.env` — **no recompiling required** to change any of them.
+All settings live in `/etc/puppycam.env` and take effect after a service restart. No recompiling needed.
 
 ```bash
 sudo nano /etc/puppycam.env
@@ -143,14 +130,7 @@ sudo systemctl restart puppycam
 
 ## Watching the stream
 
-```
-http://<device-ip>:8080
-```
-
-With Tailscale:
-```bash
-tailscale ip -4   # get the Pi's Tailscale IP
-```
+Open `http://<device-ip>:8080` in any browser. With Tailscale, get the Pi's IP with `tailscale ip -4` and use that instead.
 
 | Endpoint | Description |
 |----------|-------------|
@@ -162,14 +142,12 @@ tailscale ip -4   # get the Pi's Tailscale IP
 
 ## Telegram notifications
 
-1. Open Telegram → message `@BotFather` → `/newbot` → copy the token
-2. Message `@userinfobot` → copy your chat ID
+1. Message `@BotFather` on Telegram, create a new bot, copy the token
+2. Message `@userinfobot`, copy your chat ID
 3. Add both to `/etc/puppycam.env`
 4. `sudo systemctl restart puppycam`
 
-On each trigger you receive:
-- **Instant snapshot** — the exact frame at the moment of detection
-- **Full MP4 clip** — pre-buffer + post-buffer, uploaded when ready, local file deleted on success
+When something triggers you get an instant snapshot at the moment of detection and a full MP4 clip once it finishes recording. The clip includes the pre-event buffer so you see what led up to the trigger, not just the aftermath.
 
 ---
 
@@ -180,7 +158,7 @@ cd ~/qt-puppycam
 ./scripts/update.sh
 ```
 
-Pulls latest code from GitHub, rebuilds in Release mode, installs the new binary, restarts the service.
+Pulls from GitHub, rebuilds in Release mode, installs the new binary, restarts the service.
 
 ---
 
