@@ -23,6 +23,7 @@ static QString env(const char* key, const QString& def = {}) {
 
 int main(int argc, char *argv[])
 {
+    qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName("puppycam");
     QCoreApplication::setApplicationVersion("0.3.0");
