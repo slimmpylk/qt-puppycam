@@ -61,6 +61,7 @@ int main(int argc, char *argv[])
     qInfo() << "puppycam v0.3.0 — disarmed by default, arm from the web UI";
 
     FrameHub hub;
+    FrameHub debugHub;
 
     auto* motion   = new MotionDetector(motionThreshold, 5, &hub);
     auto* audio    = new AudioMonitor(audioDevice, soundThreshold, 5, &hub);
@@ -72,6 +73,10 @@ int main(int argc, char *argv[])
                      motion,   &MotionDetector::onNewFrame,  Qt::QueuedConnection);
     QObject::connect(&hub,    &FrameHub::newFrame,
                      recorder, &ClipRecorder::onNewFrame,    Qt::QueuedConnection);
+
+    // Motion detector debug frames → debug hub
+    QObject::connect(motion, &MotionDetector::debugFrame,
+                     &debugHub, &FrameHub::setLatestJpeg, Qt::QueuedConnection);
 
     // Detection → trigger (ClipRecorder silently ignores if disarmed)
     QObject::connect(motion, &MotionDetector::motionDetected, recorder,
@@ -97,7 +102,7 @@ int main(int argc, char *argv[])
     audio->start();
 
     // HTTP server — now also takes recorder for arm/disarm API
-    HttpServer server(&hub, recorder, fps);
+    HttpServer server(&hub, recorder, fps, &debugHub);
     if (!server.listen(static_cast<quint16>(port))) {
         qCritical() << "Failed to listen on port" << port;
         grabber.stop(); grabber.wait();

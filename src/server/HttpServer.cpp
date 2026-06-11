@@ -55,8 +55,8 @@ static bool isPost(const QByteArray& req)
 
 // ── constructor ───────────────────────────────────────────────────────────────
 
-HttpServer::HttpServer(FrameHub* hub, ClipRecorder* recorder, int fps, QObject* parent)
-    : QObject(parent), hub_(hub), recorder_(recorder), fps_(fps)
+HttpServer::HttpServer(FrameHub* hub, ClipRecorder* recorder, int fps, FrameHub* debugHub, QObject* parent)
+    : QObject(parent), hub_(hub), debugHub_(debugHub), recorder_(recorder), fps_(fps)
 {
     connect(&server_, &QTcpServer::newConnection,
             this,     &HttpServer::handleConnection);
@@ -119,7 +119,7 @@ void HttpServer::handleRequest(QTcpSocket* sock, const QByteArray& req)
         return;
     }
 
-    // ── MJPEG stream ──────────────────────────────────────────────────────────
+    // ── MJPEG stream (HD) ─────────────────────────────────────────────────────
     if (path.startsWith("/mjpeg")) {
         sock->write(
             "HTTP/1.1 200 OK\r\n"
@@ -143,6 +143,59 @@ void HttpServer::handleRequest(QTcpSocket* sock, const QByteArray& req)
             sock->flush();
         });
         timer->start(intervalMs);
+        return;
+    }
+
+    // ── MJPEG debug stream (320x180 grayscale — what motion detector sees) ────
+    if (path.startsWith("/debug-mjpeg") && debugHub_) {
+        sock->write(
+            "HTTP/1.1 200 OK\r\n"
+            "Connection: close\r\n"
+            "Cache-Control: no-store\r\n"
+            "Pragma: no-cache\r\n"
+            "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n"
+            );
+        const int intervalMs = 1000 / qMax(1, fps_);
+        auto* timer = new QTimer(sock);
+        connect(timer, &QTimer::timeout, sock, [this, sock] {
+            if (!sock->isOpen()) return;
+            const QByteArray jpeg = debugHub_->latestJpeg();
+            if (jpeg.isEmpty()) return;
+            QByteArray chunk;
+            chunk += "--frame\r\n";
+            chunk += "Content-Type: image/jpeg\r\n";
+            chunk += "Content-Length: " + QByteArray::number(jpeg.size()) + "\r\n\r\n";
+            chunk += jpeg + "\r\n";
+            sock->write(chunk);
+            sock->flush();
+        });
+        timer->start(intervalMs);
+        return;
+    }
+
+    // ── debug page ────────────────────────────────────────────────────────────
+    if (path == "/debug") {
+        const QByteArray html = R"HTML(
+<!doctype html><html><head>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>puppycam — motion debug</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:sans-serif;background:#111;color:#eee;padding:12px}
+  h3{margin:10px 0 4px;font-size:16px;font-weight:500}
+  p{font-size:12px;color:#888;margin-bottom:12px}
+  img{width:320px;height:180px;border-radius:6px;background:#000;display:block;image-rendering:pixelated}
+  a{color:#7af;font-size:14px;display:inline-block;margin-top:12px}
+</style>
+</head><body>
+<h3>Motion detector view — 320x180 grayscale</h3>
+<p>This is exactly what the motion detector compares frame-to-frame. Pixels must differ by &gt;25 luma units to count as changed.</p>
+<img src='/debug-mjpeg' alt='debug stream' />
+<br><a href='/'>&#8592; Back to main camera</a>
+</body></html>
+)HTML";
+        sock->write(httpText(200, html));
+        sock->disconnectFromHost();
         return;
     }
 

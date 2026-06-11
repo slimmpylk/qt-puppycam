@@ -10,13 +10,15 @@ class HttpServer : public QObject {
 public:
     explicit HttpServer(FrameHub*     hub,
                         ClipRecorder* recorder,
-                        int           fps    = 10,
-                        QObject*      parent = nullptr);
+                        int           fps      = 10,
+                        FrameHub*     debugHub = nullptr,
+                        QObject*      parent   = nullptr);
 
     bool listen(quint16 port);
 
 private:
     FrameHub*     hub_;
+    FrameHub*     debugHub_;
     ClipRecorder* recorder_;
     int           fps_;
     QTcpServer    server_;

@@ -1,4 +1,5 @@
 #include "MotionDetector.h"
+#include <QtCore/QBuffer>
 #include <QtCore/QDateTime>
 #include <QtCore/QDebug>
 #include <cstdlib>
@@ -13,6 +14,15 @@ void MotionDetector::onNewFrame(const QByteArray& jpeg)
                            .scaled(kW, kH, Qt::IgnoreAspectRatio, Qt::FastTransformation)
                            .convertToFormat(QImage::Format_Grayscale8);
     if (cur.isNull()) return;
+
+    // Emit debug stream (grayscale 320x180) for inspection
+    {
+        QByteArray dbg;
+        QBuffer buf(&dbg);
+        buf.open(QIODevice::WriteOnly);
+        cur.save(&buf, "JPEG", 70);
+        emit debugFrame(dbg);
+    }
 
     if (prev_.isNull()) { prev_ = cur; return; }
 

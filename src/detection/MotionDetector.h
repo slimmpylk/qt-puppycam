@@ -17,6 +17,7 @@ public slots:
 
 signals:
     void motionDetected(const QByteArray& frame);
+    void debugFrame(const QByteArray& grayscaleJpeg);
 
 private:
     QImage  prev_;
