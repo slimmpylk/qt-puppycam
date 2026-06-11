@@ -50,7 +50,7 @@ int main(int argc, char *argv[])
     const int height = parser.value(heightOpt).toInt(&ok); if (!ok||height<16)            return 2;
     const int fps    = parser.value(fpsOpt).toInt(&ok);    if (!ok||fps   <1||fps>120)    return 2;
 
-    const int     motionThreshold = env("PUPPYCAM_MOTION_THRESHOLD", "3000").toInt();
+    const int     motionThreshold = env("PUPPYCAM_MOTION_THRESHOLD", "1500").toInt();
     const int     soundThreshold  = env("PUPPYCAM_SOUND_THRESHOLD",  "1500").toInt();
     const QString audioDevice     = env("PUPPYCAM_AUDIO_DEVICE",     "auto");
     const int     preBufferSec    = env("PUPPYCAM_PRE_BUFFER_SEC",   "180").toInt();
