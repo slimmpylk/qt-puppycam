@@ -39,6 +39,14 @@ void FrameHub::setLatestJpeg(QByteArray jpeg) {
 }
 
 
+void FrameHub::setLatestJpegRaw(QByteArray jpeg) {
+    {
+        QWriteLocker g(&lock_);
+        latest_ = jpeg;
+    }
+    emit newFrame(jpeg);
+}
+
 QByteArray FrameHub::latestJpeg() const {
     QReadLocker g(&lock_);
     return latest_;

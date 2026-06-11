@@ -9,6 +9,7 @@ public:
     explicit FrameHub(QObject* parent = nullptr);
 
     void       setLatestJpeg(QByteArray jpeg);
+    void       setLatestJpegRaw(QByteArray jpeg);
     QByteArray latestJpeg() const;
 
 signals:

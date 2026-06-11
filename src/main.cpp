@@ -74,9 +74,9 @@ int main(int argc, char *argv[])
     QObject::connect(&hub,    &FrameHub::newFrame,
                      recorder, &ClipRecorder::onNewFrame,    Qt::QueuedConnection);
 
-    // Motion detector debug frames → debug hub
+    // Motion detector debug frames → debug hub (raw: no clock overlay)
     QObject::connect(motion, &MotionDetector::debugFrame,
-                     &debugHub, &FrameHub::setLatestJpeg, Qt::QueuedConnection);
+                     &debugHub, &FrameHub::setLatestJpegRaw, Qt::QueuedConnection);
 
     // Detection → trigger (ClipRecorder silently ignores if disarmed)
     QObject::connect(motion, &MotionDetector::motionDetected, recorder,
