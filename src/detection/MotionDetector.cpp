@@ -9,13 +9,12 @@ MotionDetector::MotionDetector(int threshold, int cooldownSec, QObject* parent)
 
 void MotionDetector::onNewFrame(const QByteArray& jpeg)
 {
-    // Decode, shrink, convert to grayscale — cheap on Pi 5
     const QImage cur = QImage::fromData(jpeg, "JPEG")
                            .scaled(kW, kH, Qt::IgnoreAspectRatio, Qt::FastTransformation)
                            .convertToFormat(QImage::Format_Grayscale8);
     if (cur.isNull()) return;
 
-    // Emit debug stream (grayscale 320x180) for inspection
+    // Emit debug stream so the detector's view is visible at /debug
     {
         QByteArray dbg;
         QBuffer buf(&dbg);
@@ -24,17 +23,26 @@ void MotionDetector::onNewFrame(const QByteArray& jpeg)
         emit debugFrame(dbg);
     }
 
-    if (prev_.isNull()) { prev_ = cur; return; }
+    const uchar* px = cur.constBits();
 
-    // Count pixels that changed by more than 25 luma units
+    // First frame — seed the background model and return
+    if (background_.empty()) {
+        background_.resize(kW * kH);
+        for (int i = 0; i < kW * kH; ++i)
+            background_[i] = static_cast<float>(px[i]);
+        return;
+    }
+
+    // Count pixels that differ from the background model
     int changed = 0;
-    const uchar* a = prev_.constBits();
-    const uchar* b = cur.constBits();
     for (int i = 0; i < kW * kH; ++i)
-        if (std::abs(static_cast<int>(a[i]) - static_cast<int>(b[i])) > 25)
+        if (std::abs(static_cast<int>(px[i]) - static_cast<int>(background_[i])) > kPixelDiff)
             ++changed;
 
-    prev_ = cur;
+    // Always update background slowly so it adapts to gradual scene changes
+    // (e.g. lighting shifts, dog settling into a new sleeping position)
+    for (int i = 0; i < kW * kH; ++i)
+        background_[i] = background_[i] * (1.0f - kAlpha) + px[i] * kAlpha;
 
     if (changed >= threshold_) {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
